@@ -1,59 +1,78 @@
 ﻿using QBittorrent.Client;
-Uri URL1 = new Uri("http://127.0.0.1:10305");
-Uri URL2 = new Uri("http://192.168.1.130:8080");
 
-string login1 = "admin";
-string password1 = "adminadmin";
+string pathFile = "../../../config.ini";
+Dictionary<string, string> config = ParseIniFile(pathFile);
 
-string login2 = "admin";
-string password2 = "adminadmin";
+Uri URL1 = new Uri(config["url1"]);
+Uri URL2 = new Uri(config["url2"]);
 
-string blackTag = "GOIDA";
+string login1 = config["login1"];
+string password1 = config["password1"];
 
-string newPath = "D:\\1";
+string login2 = config["login2"];
+string password2 = config["password2"];
 
+string blackTag = config["backTag"];
 
-QBittorrent.Client.QBittorrentClient qBittorrentClient = new QBittorrent.Client.QBittorrentClient(URL1);
+string newPath = config["newPath"];
+string logsPath = config["logsPath"];
+
+QBittorrent.Client.QBittorrentClient qBittorrentClient1 = new QBittorrent.Client.QBittorrentClient(URL1);
 QBittorrent.Client.QBittorrentClient qBittorrentClient2 = new QBittorrent.Client.QBittorrentClient(URL2);
 
-await qBittorrentClient.LoginAsync(login1, password1);
+await qBittorrentClient1.LoginAsync(login1, password1);
 await qBittorrentClient2.LoginAsync(login2, password2);
 
 
-var data = await qBittorrentClient.GetTorrentListAsync();
+var data = await qBittorrentClient1.GetTorrentListAsync();
 var data2 = await qBittorrentClient2.GetTorrentListAsync();
+
 var oldTorrents = new List<TorrentInfo?>();
-foreach (var log in data)
+
+//берутся все торренты из двух клиентов и добавляются в список только подходящие
+foreach (var torrent1 in data)
 {
-	/*	Console.WriteLine(log.Name + " " + log.Tags + " " + log.CompletionOn);*/
 	bool flag = true;
-	foreach (var torrent in data2)
+	foreach (var torrent2 in data2)
 	{
-		if (torrent.Hash == log.Hash)
+		if (torrent2.Hash == torrent1.Hash)
 		{
 			flag = false;
 			break;
 		}
 	}
-	if (log.CompletionOn < DateTime.Now.AddDays(-14) && !log.Tags.Contains(blackTag) && true) 
+	if (torrent1.CompletionOn < DateTime.Now.AddDays(-14) && !torrent1.Tags.Contains(blackTag) && flag) 
 	{
 		
-		oldTorrents.Add(log);
+		oldTorrents.Add(torrent1);
 	}
 }
-Console.WriteLine("\n\n\n" + data.Count + " " + oldTorrents.Count +  "\n\n");
-foreach (var log in oldTorrents)
+
+using (StreamWriter writer = new StreamWriter(logsPath, append: true))
 {
-	Console.WriteLine(log.Name + " " + log.Tags + " " + log.CompletionOn);
+	foreach (var torrent1 in oldTorrents)
+	{
+		// Формируем строку для записи
+		string logEntry = $"{DateTime.Now} {torrent1.Name} {torrent1.CompletionOn}";
+
+		// Записываем строку в файл
+		writer.WriteLine(logEntry);
+
+		// Выводим строку в консоль (опционально)
+		Console.WriteLine(logEntry);
+	}
 }
 
+Console.WriteLine("Данные о торрентах успешно записаны в файл.");
+    
+//добавляются нужные торренты
 try
 {
 	foreach(var torrent in oldTorrents)
 	{
 
-		//await qBittorrentClient.SetLocationAsync(torrent.Hash, newPath);
-		var trackers = await qBittorrentClient.GetTorrentTrackersAsync(torrent.Hash);
+		await qBittorrentClient1.SetLocationAsync(torrent.Hash, newPath);
+		var trackers = await qBittorrentClient1.GetTorrentTrackersAsync(torrent.Hash);
 
 		string magnet = $"magnet:?xt=urn:btih:{torrent.Hash}&dn={Uri.EscapeDataString(torrent.Name)}";
 		foreach (var tracker in trackers)
@@ -65,8 +84,37 @@ try
 	}
 	Console.WriteLine("перемещено успешно");
 }
-
 catch (Exception ex)
 {
 	Console.WriteLine($"Ошибка: {ex.Message}");
+}
+
+Dictionary<string, string> ParseIniFile(string filePath)
+{
+	Dictionary<string, string> iniData = new Dictionary<string, string>();
+
+	try
+	{
+		string[] lines = File.ReadAllLines(filePath);
+
+		foreach (string line in lines)
+		{
+			string trimmedLine = line.Trim();
+			if (string.IsNullOrEmpty(trimmedLine) || trimmedLine.StartsWith(";") || trimmedLine.StartsWith("#"))
+				continue;
+			string[] keyValue = trimmedLine.Split(new char[] { '=' }, 2);
+			if (keyValue.Length == 2)
+			{
+				string key = keyValue[0].Trim();
+				string value = keyValue[1].Trim();
+				iniData[key] = value;
+			}
+		}
+	}
+	catch (Exception ex)
+	{
+		Console.WriteLine("Ошибка при чтении файла: " + ex.Message);
+	}
+
+	return iniData;
 }
