@@ -61,34 +61,34 @@ using (StreamWriter writer = new StreamWriter(logsPath, append: true))
 		// Выводим строку в консоль (опционально)
 		Console.WriteLine(logEntry);
 	}
-}
 
-Console.WriteLine("Данные о торрентах успешно записаны в файл.");
+
+	writer.WriteLine("Данные о торрентах успешно записаны в файл.");
     
-//добавляются нужные торренты
-try
-{
-	foreach(var torrent in oldTorrents)
+	//добавляются нужные торренты
+	try
 	{
-
-		await qBittorrentClient1.SetLocationAsync(torrent.Hash, newPath);
-		var trackers = await qBittorrentClient1.GetTorrentTrackersAsync(torrent.Hash);
-
-		string magnet = $"magnet:?xt=urn:btih:{torrent.Hash}&dn={Uri.EscapeDataString(torrent.Name)}";
-		foreach (var tracker in trackers)
+		foreach(var torrent in oldTorrents)
 		{
-			magnet +=($"&tr={tracker.Url}");
+
+			await qBittorrentClient1.SetLocationAsync(torrent.Hash, newPath);
+			var trackers = await qBittorrentClient1.GetTorrentTrackersAsync(torrent.Hash);
+
+			string magnet = $"magnet:?xt=urn:btih:{torrent.Hash}&dn={Uri.EscapeDataString(torrent.Name)}";
+			foreach (var tracker in trackers)
+			{
+				magnet +=($"&tr={tracker.Url}");
+			}
+
+			await qBittorrentClient2.AddTorrentsAsync(new AddTorrentUrlsRequest(new Uri(magnet)));
 		}
-
-		await qBittorrentClient2.AddTorrentsAsync(new AddTorrentUrlsRequest(new Uri(magnet)));
+		writer.WriteLine("перемещено успешно");
 	}
-	Console.WriteLine("перемещено успешно");
+	catch (Exception ex)
+	{
+		writer.WriteLine($"Ошибка: {ex.Message}");
+	}
 }
-catch (Exception ex)
-{
-	Console.WriteLine($"Ошибка: {ex.Message}");
-}
-
 Dictionary<string, string> ParseIniFile(string filePath)
 {
 	Dictionary<string, string> iniData = new Dictionary<string, string>();
