@@ -1,7 +1,15 @@
 ﻿using QBittorrent.Client;
+using System;
+using Serilog;
 
 string pathFile = "../../../config.ini";
 Dictionary<string, string> config = ParseIniFile(pathFile);
+
+using var log = new LoggerConfiguration()
+	.WriteTo.Console()
+	.WriteTo.File(config["logsPath"], rollingInterval: RollingInterval.Year)
+	.CreateLogger();
+
 
 Uri URL1 = new Uri(config["url1"]);
 Uri URL2 = new Uri(config["url2"]);
@@ -48,47 +56,89 @@ foreach (var torrent1 in data)
 	}
 }
 
-using (StreamWriter writer = new StreamWriter(logsPath, append: true))
-{
+
+
 	foreach (var torrent1 in oldTorrents)
 	{
-		// Формируем строку для записи
+
 		string logEntry = $"{DateTime.Now} {torrent1.Name} {torrent1.CompletionOn}";
 
-		// Записываем строку в файл
-		writer.WriteLine(logEntry);
-
-		// Выводим строку в консоль (опционально)
-		Console.WriteLine(logEntry);
-	}
-
-
-	writer.WriteLine("Данные о торрентах успешно записаны в файл.");
-    
-	//добавляются нужные торренты
-	try
-	{
-		foreach(var torrent in oldTorrents)
-		{
-
-			await qBittorrentClient1.SetLocationAsync(torrent.Hash, newPath);
-			var trackers = await qBittorrentClient1.GetTorrentTrackersAsync(torrent.Hash);
-
-			string magnet = $"magnet:?xt=urn:btih:{torrent.Hash}&dn={Uri.EscapeDataString(torrent.Name)}";
-			foreach (var tracker in trackers)
-			{
-				magnet +=($"&tr={tracker.Url}");
-			}
-
-			await qBittorrentClient2.AddTorrentsAsync(new AddTorrentUrlsRequest(new Uri(magnet)));
-		}
-		writer.WriteLine("перемещено успешно");
-	}
-	catch (Exception ex)
-	{
-		writer.WriteLine($"Ошибка: {ex.Message}");
-	}
+		log.Information(logEntry);
 }
+
+    
+//добавляются нужные торренты
+try
+{
+	foreach(var torrent in oldTorrents)
+	{
+		//перенос файла
+		await qBittorrentClient1.SetLocationAsync(torrent.Hash, newPath);
+
+		bool isTorrentReady = false;
+		while (!isTorrentReady)
+		{
+			var torrentInfo = await qBittorrentClient1.GetTorrentListAsync();
+			var currentTorrent = torrentInfo.FirstOrDefault(t => t.Hash == torrent.Hash);
+			if (currentTorrent != null && currentTorrent.State != TorrentState.Moving)
+			{
+				isTorrentReady = true;
+			}
+			else
+			{
+				await Task.Delay(5000);
+			}
+		}
+
+		//создание магнет-ссылки
+		var trackers = await qBittorrentClient1.GetTorrentTrackersAsync(torrent.Hash);
+
+		string magnet = $"magnet:?xt=urn:btih:{torrent.Hash}&dn={Uri.EscapeDataString(torrent.Name)}";
+		foreach (var tracker in trackers)
+		{
+			magnet +=($"&tr={tracker.Url}");
+		}
+
+		var addTorrentRequest = new AddTorrentUrlsRequest(new Uri(magnet))
+		{
+			Paused = true 
+		};
+
+		await qBittorrentClient2.AddTorrentsAsync(addTorrentRequest);
+		await Task.Delay(15000);
+		await qBittorrentClient2.SetLocationAsync(torrent.Hash, newPath);
+		await qBittorrentClient2.AddTorrentPeerAsync(torrent.Hash, config["firstClientPeerIp"]);
+		await qBittorrentClient2.ResumeAsync(torrent.Hash);
+
+
+		//ожидание проверки торрента
+		isTorrentReady = false;
+		while (!isTorrentReady)
+		{
+			var torrentInfo = await qBittorrentClient2.GetTorrentListAsync();
+			var currentTorrent = torrentInfo.FirstOrDefault(t => t.Hash == torrent.Hash);
+			Console.WriteLine(currentTorrent.State);
+			if (currentTorrent != null && (currentTorrent.State == TorrentState.Uploading || currentTorrent.State == TorrentState.StalledUpload))
+			{
+				isTorrentReady = true;
+			log.Information(torrent.Name + " успешно добавлен");
+			}
+			else
+			{
+				await Task.Delay(5000); 
+			}
+		}
+		await qBittorrentClient1.DeleteAsync(torrent.Hash);
+	}
+	log.Information("перемещено успешно");
+}
+catch (Exception ex)
+{
+	log.Error($"Ошибка: {ex.Message}");
+}
+
+
+
 Dictionary<string, string> ParseIniFile(string filePath)
 {
 	Dictionary<string, string> iniData = new Dictionary<string, string>();
