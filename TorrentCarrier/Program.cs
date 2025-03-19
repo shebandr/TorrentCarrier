@@ -22,14 +22,15 @@ string password2 = config["password2"];
 
 string blackTag = config["backTag"];
 
-string newPath = config["newPath"];
+string newPathNetwork = config["newPathNetwork"];
+string newPathLocal = config["newPathLocal"];
 string logsPath = config["logsPath"];
 
 QBittorrent.Client.QBittorrentClient qBittorrentClient1 = new QBittorrent.Client.QBittorrentClient(URL1);
 QBittorrent.Client.QBittorrentClient qBittorrentClient2 = new QBittorrent.Client.QBittorrentClient(URL2);
 
-await qBittorrentClient1.LoginAsync(login1, password1);
-await qBittorrentClient2.LoginAsync(login2, password2);
+// await qBittorrentClient1.LoginAsync(login1, password1);
+// await qBittorrentClient2.LoginAsync(login2, password2);
 
 
 var data = await qBittorrentClient1.GetTorrentListAsync();
@@ -40,30 +41,23 @@ var oldTorrents = new List<TorrentInfo?>();
 //берутся все торренты из двух клиентов и добавляются в список только подходящие
 foreach (var torrent1 in data)
 {
-	bool flag = true;
-	foreach (var torrent2 in data2)
-	{
-		if (torrent2.Hash == torrent1.Hash)
-		{
-			flag = false;
-			break;
-		}
-	}
-	if (torrent1.CompletionOn < DateTime.Now.AddDays(-14) && !torrent1.Tags.Contains(blackTag) && flag) 
-	{
-		
+	if(torrent1.Tags.Contains(blackTag))
+		continue;
+
+	if(data2.Any(t => t.Hash == torrent1.Hash))
+		await qBittorrentClient1.DeleteAsync(torrent1.Hash);
+
+	if (torrent1.CompletionOn < DateTime.Now.AddDays(-14))
 		oldTorrents.Add(torrent1);
-	}
 }
 
 
 
-	foreach (var torrent1 in oldTorrents)
-	{
+foreach (var torrent1 in oldTorrents)
+{
+	string logEntry = $"{DateTime.Now} {torrent1.Name} {torrent1.CompletionOn}";
 
-		string logEntry = $"{DateTime.Now} {torrent1.Name} {torrent1.CompletionOn}";
-
-		log.Information(logEntry);
+	log.Information(logEntry);
 }
 
     
@@ -73,7 +67,7 @@ try
 	foreach(var torrent in oldTorrents)
 	{
 		//перенос файла
-		await qBittorrentClient1.SetLocationAsync(torrent.Hash, newPath);
+		await qBittorrentClient1.SetLocationAsync(torrent.Hash, newPathNetwork);
 
 		bool isTorrentReady = false;
 		while (!isTorrentReady)
@@ -94,7 +88,7 @@ try
 		var trackers = await qBittorrentClient1.GetTorrentTrackersAsync(torrent.Hash);
 
 		string magnet = $"magnet:?xt=urn:btih:{torrent.Hash}&dn={Uri.EscapeDataString(torrent.Name)}";
-		foreach (var tracker in trackers)
+		foreach (var tracker in trackers.Skip(3))
 		{
 			magnet +=($"&tr={tracker.Url}");
 		}
@@ -106,7 +100,7 @@ try
 
 		await qBittorrentClient2.AddTorrentsAsync(addTorrentRequest);
 		await Task.Delay(15000);
-		await qBittorrentClient2.SetLocationAsync(torrent.Hash, newPath);
+		await qBittorrentClient2.SetLocationAsync(torrent.Hash, newPathLocal);
 		await qBittorrentClient2.AddTorrentPeerAsync(torrent.Hash, config["firstClientPeerIp"]);
 		await qBittorrentClient2.ResumeAsync(torrent.Hash);
 
@@ -118,6 +112,10 @@ try
 			var torrentInfo = await qBittorrentClient2.GetTorrentListAsync();
 			var currentTorrent = torrentInfo.FirstOrDefault(t => t.Hash == torrent.Hash);
 			Console.WriteLine(currentTorrent.State);
+
+			if(currentTorrent.State == TorrentState.PausedDownload)
+				await qBittorrentClient2.ResumeAsync(torrent.Hash);
+
 			if (currentTorrent != null && (currentTorrent.State == TorrentState.Uploading || currentTorrent.State == TorrentState.StalledUpload))
 			{
 				isTorrentReady = true;
