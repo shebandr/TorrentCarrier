@@ -44,10 +44,10 @@ foreach (var torrent1 in data)
 	if(torrent1.Tags.Contains(blackTag))
 		continue;
 
-	if(data2.Any(t => t.Hash == torrent1.Hash))
-		await qBittorrentClient1.DeleteAsync(torrent1.Hash);
+	// if(data2.Any(t => t.Hash == torrent1.Hash))
+	// 	await qBittorrentClient1.DeleteAsync(torrent1.Hash);
 
-	if (torrent1.CompletionOn < DateTime.Now.AddDays(-14))
+	if (torrent1.CompletionOn < DateTime.Now)//.AddDays(-14))
 		oldTorrents.Add(torrent1);
 }
 
@@ -102,6 +102,7 @@ try
 		await Task.Delay(15000);
 		await qBittorrentClient2.SetLocationAsync(torrent.Hash, newPathLocal);
 		await qBittorrentClient2.AddTorrentPeerAsync(torrent.Hash, config["firstClientPeerIp"]);
+		await qBittorrentClient2.RecheckAsync(torrent.Hash);
 		await qBittorrentClient2.ResumeAsync(torrent.Hash);
 
 
@@ -113,7 +114,7 @@ try
 			var currentTorrent = torrentInfo.FirstOrDefault(t => t.Hash == torrent.Hash);
 			Console.WriteLine(currentTorrent.State);
 
-			if(currentTorrent.State == TorrentState.PausedDownload)
+			if(currentTorrent.State == TorrentState.PausedDownload || currentTorrent.State == TorrentState.PausedUpload)
 				await qBittorrentClient2.ResumeAsync(torrent.Hash);
 
 			if (currentTorrent != null && (currentTorrent.State == TorrentState.Uploading || currentTorrent.State == TorrentState.StalledUpload))
